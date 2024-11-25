@@ -5,6 +5,7 @@ import os
 import socket
 from datetime import datetime
 from file_download import *
+import threading
 
 # Load or create metadata for available files
 def load_metadata():
@@ -141,44 +142,6 @@ def refresh_file_list():
                         f"Time: {file_info['upload_time']} | Downloads: {file_info['download_count']}")
         file_listbox.insert(tk.END, file_display)
 
-def send_file(client_socket, file_path):
-    """Send the requested file to the client."""
-    with open(file_path, 'rb') as f:
-        print(f"Sending file: {file_path}")
-        while chunk := f.read(1024):
-            client_socket.sendall(chunk)
-    print(f"File {file_path} sent successfully.")
-
-def handle_request(client_socket):
-    """Handle incoming file requests."""
-    try:
-        # Receive the request message
-        request_message = client_socket.recv(1024).decode().strip()
-        print(f"Received request: {request_message}")
-        
-        # Parse and process the request
-        if request_message.startswith("REQUEST_FILE:"):
-            file_name = request_message.split(":", 1)[1]
-            file_path = os.path.join("shared", file_name)
-            
-            if os.path.isfile(file_path):
-                # Send response indicating file transfer will start
-                client_socket.sendall(f"START_SENDING:{file_name}".encode())
-                send_file(client_socket, file_path)
-            else:
-                # Inform client file does not exist
-                client_socket.sendall(b"FILE_NOT_FOUND")
-                print(f"File not found: {file_name}")
-        else:
-            # Handle invalid request
-            client_socket.sendall(b"INVALID_REQUEST")
-            print(f"Invalid request: {request_message}")
-    except Exception as e:
-        print(f"Error handling request: {e}")
-    finally:
-        client_socket.close()
-
-
 def refresh_metadata():
     server_ip = "192.168.137.135"
     port = 5001
@@ -209,6 +172,49 @@ def display_temporary_message(message, color):
     message_label.config(text=message, fg=color)
     message_label.pack()
     root.after(3000, lambda: message_label.pack_forget())
+
+PEER_PORT = 5001  # Port to listen for peer requests
+
+# Function to handle incoming peer requests
+def handle_peer_request(conn, addr):
+    try:
+        request = conn.recv(1024).decode()
+        if request.startswith("FILE_REQUEST:"):
+            _, requested_file = request.split(" ")
+            metadata = load_metadata()
+            for file_info in metadata["files"]:
+                if file_info["file_name"] == requested_file:
+                    file_path = os.path.join("shared", requested_file)
+                    if os.path.exists(file_path):
+                        with open(file_path, "rb") as f:
+                            conn.sendall(f.read())
+                        print(f"File '{requested_file}' sent to {addr}.")
+                    else:
+                        conn.sendall(b"ERROR: File not found.")
+                    break
+            else:
+                conn.sendall(b"ERROR: File not available.")
+        else:
+            conn.sendall(b"ERROR: Invalid request.")
+    except Exception as e:
+        print(f"Error handling request from {addr}: {e}")
+    finally:
+        conn.close()
+
+# Listener function to handle peer connections
+def start_peer_listener():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("", PEER_PORT))
+        listener.listen(5)
+        print(f"Listening for peer requests on port {PEER_PORT}...")
+        while True:
+            conn, addr = listener.accept()
+            print(f"Connection received from {addr}.")
+            threading.Thread(target=handle_peer_request, args=(conn, addr), daemon=True).start()
+
+# Start peer listener in a separate thread
+listener_thread = threading.Thread(target=start_peer_listener, daemon=True)
+listener_thread.start()
 
 # Set up the GUI
 root = tk.Tk()
@@ -246,6 +252,6 @@ refresh_button.grid(row=0, column=2, padx=5)
 
 # Initial load of available files
 refresh_file_list()
-handle_request()
+# handle_request()
 
 root.mainloop()

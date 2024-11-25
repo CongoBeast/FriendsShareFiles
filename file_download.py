@@ -14,7 +14,12 @@ def download_file(ip, port, file_name):
         client.connect((ip, port))
         client.sendall(file_name.encode())  # Request the file by name
 
-        request_message = f"REQUEST_FILE:{file_name}"
+        notification_message = f"DOWNLOADING:{file_name}"
+        client.sendall(notification_message.encode())
+        print(f"Notification sent to peer: {notification_message}")
+        
+
+        request_message = f"FILE_REQUEST:{file_name}"
         client.sendall(request_message.encode())  
         print(f"Sent request: {request_message}")
 
@@ -27,11 +32,15 @@ def download_file(ip, port, file_name):
             print(f"Error: {file_name} not found on the server.")
             return
         
+        total_bytes_received = 0
+        
         with open(local_save_path, 'wb') as file:
             # Receive the file in chunks and write to the local file
             while data := client.recv(1024):
                 if data:
                     file.write(data)
+                    total_bytes_received += len(data)  # Update counter
+                    print(f"Bytes received so far: {total_bytes_received}")
                 else:
                     break  # No more data; break out of the loop
 
