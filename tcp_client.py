@@ -83,7 +83,7 @@ def upload_file():
             data = json.load(f)
             data["files"].append({
                 "file_name": file_name, 
-                "ip": "localhost", 
+                "ip": "192.168.137.135", 
                 "port": PORT,
                 "username": username,
                 "upload_time": upload_time,
@@ -97,20 +97,6 @@ def upload_file():
         
         # Notify server of updated metadata
         notify_server_metadata("192.168.137.135", 5001 , data)
-
-# Notify server of updated metadata
-# def notify_server_metadata():
-#     server_ip = "192.168.137.135"  # Replace with actual server IP
-#     server_port = 5001      # Replace with actual server port
-#     try:
-#         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-#             s.connect((server_ip, server_port))
-#             with open("metadata.json", "r") as f:
-#                 metadata = f.read()
-#             s.sendall(metadata.encode())
-#             print("Metadata successfully sent to the server.")
-#     except Exception as e:
-#         print(f"Failed to notify server: {e}")
 
 # Download selected file
 def download_selected_file():
@@ -155,26 +141,47 @@ def refresh_file_list():
                         f"Time: {file_info['upload_time']} | Downloads: {file_info['download_count']}")
         file_listbox.insert(tk.END, file_display)
 
-# Request latest metadata from the server
-# def request_metadata(server_ip, port):
-#     try:
-#         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-#             s.connect((server_ip, port))
-#             s.sendall(b"METADATA_REQUEST")
-            
-#             metadata = s.recv(1024*10)  # Adjust buffer size if needed
-#             with open("metadata.json", "w") as f:
-#                 f.write(metadata.decode())
+def send_file(client_socket, file_path):
+    """Send the requested file to the client."""
+    with open(file_path, 'rb') as f:
+        print(f"Sending file: {file_path}")
+        while chunk := f.read(1024):
+            client_socket.sendall(chunk)
+    print(f"File {file_path} sent successfully.")
+
+def handle_request(client_socket):
+    """Handle incoming file requests."""
+    try:
+        # Receive the request message
+        request_message = client_socket.recv(1024).decode().strip()
+        print(f"Received request: {request_message}")
         
-#         refresh_file_list()
-#         display_temporary_message("Metadata refreshed successfully!", "green")
-#     except Exception as e:
-#         print(f"Failed to refresh metadata: {e}")
-#         display_temporary_message("Failed to refresh metadata!", "red")
+        # Parse and process the request
+        if request_message.startswith("REQUEST_FILE:"):
+            file_name = request_message.split(":", 1)[1]
+            file_path = os.path.join("shared", file_name)
+            
+            if os.path.isfile(file_path):
+                # Send response indicating file transfer will start
+                client_socket.sendall(f"START_SENDING:{file_name}".encode())
+                send_file(client_socket, file_path)
+            else:
+                # Inform client file does not exist
+                client_socket.sendall(b"FILE_NOT_FOUND")
+                print(f"File not found: {file_name}")
+        else:
+            # Handle invalid request
+            client_socket.sendall(b"INVALID_REQUEST")
+            print(f"Invalid request: {request_message}")
+    except Exception as e:
+        print(f"Error handling request: {e}")
+    finally:
+        client_socket.close()
+
 
 def refresh_metadata():
-    server_ip = "127.0.0.1"
-    port = 5002
+    server_ip = "192.168.137.135"
+    port = 5001
 
     # Request metadata from server
     server_metadata = request_metadata(server_ip, port)
@@ -233,15 +240,12 @@ upload_button.grid(row=0, column=0, padx=5)
 download_button = tk.Button(button_frame, text="Download File", command=download_selected_file, bg="blue", fg="white", font=("Helvetica", 10))
 download_button.grid(row=0, column=1, padx=5)
 
-# refresh_button = tk.Button(button_frame, text="Refresh Metadata", 
-#                            command=lambda: request_metadata("192.168.137.135", 5001), 
-#                            bg="orange", fg="white", font=("Helvetica", 10))
-# refresh_button.grid(row=0, column=2, padx=5)
 
 refresh_button = tk.Button(button_frame, text="Refresh", command=refresh_metadata, bg="orange", fg="white", font=("Helvetica", 10))
 refresh_button.grid(row=0, column=2, padx=5)
 
 # Initial load of available files
 refresh_file_list()
+handle_request()
 
 root.mainloop()
